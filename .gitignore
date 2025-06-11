@@ -152,3 +152,6 @@ templates/custom/
 .windsurfrules
 package.json
 package-lock.json
+
+.coverage
+.coverage.xml
