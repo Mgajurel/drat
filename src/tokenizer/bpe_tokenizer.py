@@ -157,6 +157,24 @@ class BPETokenizer:
             return self.tokenizer.token_to_id(self.config.mask_token)
         return 4  # Default MASK token ID
     
+    @property
+    def vocab(self) -> Dict[str, int]:
+        """Get vocabulary mapping. Alias for get_vocab() for compatibility."""
+        if self._is_trained:
+            return self.get_vocab()
+        return {}
+    
+    @property
+    def special_tokens(self) -> Dict[str, str]:
+        """Get special tokens mapping for compatibility."""
+        return {
+            'pad_token': self.config.pad_token,
+            'unk_token': self.config.unk_token,
+            'bos_token': self.config.bos_token,
+            'eos_token': self.config.eos_token,
+            'mask_token': self.config.mask_token
+        }
+    
     def train(self, texts: List[str], save_path: Optional[str] = None) -> None:
         """
         Train the BPE tokenizer on provided texts.
