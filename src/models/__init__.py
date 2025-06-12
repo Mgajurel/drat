@@ -29,6 +29,11 @@ from .feedforward import (
     LayerNorm,
     TransformerLayer
 )
+from .gates import (
+    RecomputationGate,
+    GatedTransformerLayer,
+    GateManager
+)
 
 __all__ = [
     # Configuration
@@ -53,4 +58,9 @@ __all__ = [
     'FeedForwardNetwork',
     'LayerNorm',
     'TransformerLayer',
+    
+    # Recomputation gates
+    'RecomputationGate',
+    'GatedTransformerLayer',
+    'GateManager',
 ] 

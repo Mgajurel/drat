@@ -68,6 +68,13 @@ class TransformerConfig:
     # Scaling factors
     attention_scale: Optional[float] = None  # If None, uses 1/sqrt(head_dim)
     
+    # Recomputation gate configuration
+    use_recomputation_gates: bool = False
+    gate_type: str = "global"  # Options: "global", "per_head", "per_token"
+    gate_init_bias: float = 0.0  # Initial bias for gates (affects storage probability)
+    gate_temperature: float = 1.0  # Temperature for sigmoid (lower = more binary)
+    use_straight_through: bool = True  # Use straight-through estimator for gradients
+    
     # Computed fields (set in __post_init__)
     head_dim: int = field(init=False)
     
@@ -108,6 +115,15 @@ class TransformerConfig:
         valid_position_types = {"absolute", "relative"}
         if self.position_embedding_type not in valid_position_types:
             raise ValueError(f"position_embedding_type must be one of {valid_position_types}")
+        
+        # Validate gate configuration
+        if self.use_recomputation_gates:
+            valid_gate_types = {"global", "per_head", "per_token"}
+            if self.gate_type not in valid_gate_types:
+                raise ValueError(f"gate_type must be one of {valid_gate_types}")
+            
+            if self.gate_temperature <= 0:
+                raise ValueError("gate_temperature must be positive")
     
 
     
