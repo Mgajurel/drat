@@ -17,6 +17,7 @@ from .config import (
     get_tiny_config
 )
 from .transformer import BaselineTransformer, TransformerEmbeddings
+from .gated_transformer import GatedTransformer
 from .attention import (
     MultiHeadAttention,
     ScaledDotProductAttention,
@@ -46,6 +47,7 @@ __all__ = [
     # Main model
     'BaselineTransformer',
     'TransformerEmbeddings',
+    'GatedTransformer',
     
     # Attention components
     'MultiHeadAttention',

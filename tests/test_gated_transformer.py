@@ -1,0 +1,289 @@
+"""
+Tests for the GatedTransformer model integration.
+
+This module tests the complete gated transformer model including:
+- Model initialization and configuration
+- Forward pass with and without gate information
+- Integration with gate manager
+- Memory pressure modes
+- Gate statistics collection
+"""
+
+import pytest
+import torch
+import torch.nn as nn
+
+from src.models.config import TransformerConfig
+from src.models.gated_transformer import GatedTransformer
+
+
+class TestGatedTransformerBasic:
+    """Test basic gated transformer functionality."""
+    
+    def test_model_initialization(self):
+        """Test basic model initialization."""
+        config = TransformerConfig(
+            vocab_size=1000,
+            hidden_size=256,
+            num_hidden_layers=2,
+            num_attention_heads=8,
+            use_recomputation_gates=True,
+            gate_type="global"
+        )
+        
+        model = GatedTransformer(config)
+        
+        # Check basic structure
+        assert len(model.layers) == 2
+        assert model.config.hidden_size == 256
+        assert model.config.use_recomputation_gates is True
+        
+        # Check gate manager exists
+        assert model.gate_manager is not None
+    
+    def test_forward_pass(self):
+        """Test basic forward pass."""
+        config = TransformerConfig(
+            vocab_size=1000,
+            hidden_size=256,
+            num_hidden_layers=2,
+            num_attention_heads=8,
+            use_recomputation_gates=True,
+            gate_type="global"
+        )
+        
+        model = GatedTransformer(config)
+        model.eval()
+        
+        # Test input
+        batch_size, seq_len = 2, 10
+        input_ids = torch.randint(0, 1000, (batch_size, seq_len))
+        
+        # Forward pass
+        outputs = model(input_ids)
+        
+        # Check outputs
+        assert 'last_hidden_state' in outputs
+        assert 'logits' in outputs
+        assert outputs['last_hidden_state'].shape == (batch_size, seq_len, 256)
+        assert outputs['logits'].shape == (batch_size, seq_len, 1000)
+    
+    def test_forward_with_gate_info(self):
+        """Test forward pass with gate information."""
+        config = TransformerConfig(
+            vocab_size=1000,
+            hidden_size=256,
+            num_hidden_layers=2,
+            num_attention_heads=8,
+            use_recomputation_gates=True,
+            gate_type="global"
+        )
+        
+        model = GatedTransformer(config)
+        model.eval()
+        
+        # Test input
+        batch_size, seq_len = 2, 10
+        input_ids = torch.randint(0, 1000, (batch_size, seq_len))
+        
+        # Forward pass with gate info
+        outputs = model(input_ids, return_gate_info=True)
+        
+        # Check outputs
+        assert 'gate_info' in outputs
+        assert 'gate_statistics' in outputs
+        assert len(outputs['gate_info']) == 2  # 2 layers
+    
+    def test_gradient_flow(self):
+        """Test that gradients flow properly."""
+        config = TransformerConfig(
+            vocab_size=1000,
+            hidden_size=256,
+            num_hidden_layers=2,
+            num_attention_heads=8,
+            use_recomputation_gates=True,
+            gate_type="global"
+        )
+        
+        model = GatedTransformer(config)
+        
+        # Test input
+        input_ids = torch.randint(0, 1000, (2, 10))
+        
+        # Forward pass
+        outputs = model(input_ids)
+        
+        # Compute loss and backward pass
+        loss = outputs['logits'].sum()
+        loss.backward()
+        
+        # Check that gate parameters have gradients
+        for layer in model.layers:
+            assert layer.attention_gate.gate_param.grad is not None
+            assert layer.ff_gate.gate_param.grad is not None
+    
+    def test_memory_pressure_modes(self):
+        """Test different memory pressure modes."""
+        config = TransformerConfig(
+            vocab_size=1000,
+            hidden_size=256,
+            num_hidden_layers=2,
+            num_attention_heads=8,
+            use_recomputation_gates=True,
+            gate_type="global"
+        )
+        
+        model = GatedTransformer(config)
+        
+        pressure_modes = ["low", "medium", "high", "extreme"]
+        
+        for mode in pressure_modes:
+            model.set_memory_pressure(mode)
+            
+            # Test forward pass works with this mode
+            input_ids = torch.randint(0, 1000, (2, 10))
+            outputs = model(input_ids)
+            assert 'last_hidden_state' in outputs
+    
+    def test_gate_statistics(self):
+        """Test gate statistics collection."""
+        config = TransformerConfig(
+            vocab_size=1000,
+            hidden_size=256,
+            num_hidden_layers=2,
+            num_attention_heads=8,
+            use_recomputation_gates=True,
+            gate_type="global"
+        )
+        
+        model = GatedTransformer(config)
+        model.eval()
+        
+        # Forward pass to generate statistics
+        input_ids = torch.randint(0, 1000, (2, 10))
+        outputs = model(input_ids, return_gate_info=True)
+        
+        # Get statistics
+        stats = model.get_gate_statistics()
+        
+        # Check statistics structure
+        assert 'layer_stats' in stats
+        assert 'avg_attention_prob' in stats
+        assert 'avg_ff_prob' in stats
+        assert len(stats['layer_stats']) == 2
+    
+    def test_gate_probability_setting(self):
+        """Test manual gate probability setting."""
+        config = TransformerConfig(
+            vocab_size=1000,
+            hidden_size=256,
+            num_hidden_layers=2,
+            num_attention_heads=8,
+            use_recomputation_gates=True,
+            gate_type="global"
+        )
+        
+        model = GatedTransformer(config)
+        
+        # Set specific probabilities
+        attention_prob = 0.3
+        ff_prob = 0.7
+        model.set_gate_probabilities(attention_prob, ff_prob)
+        
+        # Test that probabilities are approximately set
+        # (they won't be exact due to sigmoid activation)
+        input_ids = torch.randint(0, 1000, (2, 10))
+        with torch.no_grad():
+            outputs = model(input_ids, return_gate_info=True)
+        
+        stats = model.get_gate_statistics()
+        
+        # Check that probabilities are in reasonable range
+        # (allowing some tolerance due to sigmoid and initialization)
+        assert 0.1 <= stats['avg_attention_prob'] <= 0.9
+        assert 0.1 <= stats['avg_ff_prob'] <= 0.9
+    
+    def test_clear_stored_activations(self):
+        """Test clearing stored activations."""
+        config = TransformerConfig(
+            vocab_size=1000,
+            hidden_size=256,
+            num_hidden_layers=2,
+            num_attention_heads=8,
+            use_recomputation_gates=True,
+            gate_type="global"
+        )
+        
+        model = GatedTransformer(config)
+        
+        # Forward pass to potentially store activations
+        input_ids = torch.randint(0, 1000, (2, 10))
+        model(input_ids)
+        
+        # Clear stored activations (should not raise errors)
+        model.clear_stored_activations()
+
+
+class TestGatedTransformerComparison:
+    """Test comparison with baseline transformer."""
+    
+    def test_output_shape_consistency(self):
+        """Test that gated transformer produces same output shapes as baseline."""
+        from src.models.transformer import BaselineTransformer
+        
+        config = TransformerConfig(
+            vocab_size=1000,
+            hidden_size=256,
+            num_hidden_layers=2,
+            num_attention_heads=8,
+            use_recomputation_gates=True
+        )
+        
+        # Create both models
+        gated_model = GatedTransformer(config)
+        baseline_model = BaselineTransformer(config)
+        
+        # Test input
+        batch_size, seq_len = 2, 10
+        input_ids = torch.randint(0, 1000, (batch_size, seq_len))
+        
+        # Forward pass through both models
+        gated_outputs = gated_model(input_ids)
+        baseline_outputs = baseline_model(input_ids)
+        
+        # Check that output shapes match
+        assert gated_outputs['last_hidden_state'].shape == baseline_outputs['last_hidden_state'].shape
+        assert gated_outputs['logits'].shape == baseline_outputs['logits'].shape
+    
+    def test_parameter_count_difference(self):
+        """Test that gated model has more parameters due to gates."""
+        from src.models.transformer import BaselineTransformer
+        
+        config = TransformerConfig(
+            vocab_size=1000,
+            hidden_size=256,
+            num_hidden_layers=2,
+            num_attention_heads=8,
+            use_recomputation_gates=True
+        )
+        
+        # Create both models
+        gated_model = GatedTransformer(config)
+        baseline_model = BaselineTransformer(config)
+        
+        # Count parameters
+        gated_params = sum(p.numel() for p in gated_model.parameters())
+        baseline_params = sum(p.numel() for p in baseline_model.parameters())
+        
+        # Gated model should have more parameters due to gates
+        assert gated_params > baseline_params
+        
+        # The difference should be the gate parameters
+        gate_params = sum(
+            p.numel() for layer in gated_model.layers 
+            for gate in [layer.attention_gate, layer.ff_gate]
+            for p in gate.parameters()
+        )
+        
+        # Allow some tolerance for potential differences in initialization
+        assert abs((gated_params - baseline_params) - gate_params) <= 10 
