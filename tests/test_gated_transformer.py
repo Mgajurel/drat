@@ -287,3 +287,93 @@ class TestGatedTransformerComparison:
         
         # Allow some tolerance for potential differences in initialization
         assert abs((gated_params - baseline_params) - gate_params) <= 10 
+
+
+class TestGatedTransformerDifferentiability:
+    """Test differentiability and gradient flow through gates."""
+    
+    def test_gradient_flow_straight_through_enabled(self):
+        """Test gradient flow with straight-through estimator enabled."""
+        config = TransformerConfig(
+            vocab_size=1000,
+            hidden_size=128,
+            num_hidden_layers=1,
+            num_attention_heads=4,
+            use_recomputation_gates=True,
+            gate_type="global",
+            use_straight_through=True
+        )
+        model = GatedTransformer(config)
+        input_ids = torch.randint(0, 1000, (2, 8))
+        outputs = model(input_ids)
+        loss = outputs['logits'].sum()
+        loss.backward()
+        # Check gradients
+        for layer in model.layers:
+            assert layer.attention_gate.gate_param.grad is not None
+            assert layer.ff_gate.gate_param.grad is not None
+            assert torch.any(layer.attention_gate.gate_param.grad != 0)
+            assert torch.any(layer.ff_gate.gate_param.grad != 0)
+    
+    def test_gradient_flow_straight_through_disabled(self):
+        """Test gradient flow with straight-through estimator disabled."""
+        config = TransformerConfig(
+            vocab_size=1000,
+            hidden_size=128,
+            num_hidden_layers=1,
+            num_attention_heads=4,
+            use_recomputation_gates=True,
+            gate_type="global",
+            use_straight_through=False
+        )
+        model = GatedTransformer(config)
+        input_ids = torch.randint(0, 1000, (2, 8))
+        outputs = model(input_ids)
+        loss = outputs['logits'].sum()
+        loss.backward()
+        # Check gradients
+        for layer in model.layers:
+            assert layer.attention_gate.gate_param.grad is not None
+            assert layer.ff_gate.gate_param.grad is not None
+            assert torch.any(layer.attention_gate.gate_param.grad != 0)
+            assert torch.any(layer.ff_gate.gate_param.grad != 0)
+    
+    def test_gradient_flow_all_gates_open(self):
+        """Test gradient flow when all gates are forced open (high bias)."""
+        config = TransformerConfig(
+            vocab_size=1000,
+            hidden_size=128,
+            num_hidden_layers=1,
+            num_attention_heads=4,
+            use_recomputation_gates=True,
+            gate_type="global",
+            gate_init_bias=10.0  # Force gates open
+        )
+        model = GatedTransformer(config)
+        input_ids = torch.randint(0, 1000, (2, 8))
+        outputs = model(input_ids)
+        loss = outputs['logits'].sum()
+        loss.backward()
+        for layer in model.layers:
+            assert layer.attention_gate.gate_param.grad is not None
+            assert layer.ff_gate.gate_param.grad is not None
+    
+    def test_gradient_flow_all_gates_closed(self):
+        """Test gradient flow when all gates are forced closed (low bias)."""
+        config = TransformerConfig(
+            vocab_size=1000,
+            hidden_size=128,
+            num_hidden_layers=1,
+            num_attention_heads=4,
+            use_recomputation_gates=True,
+            gate_type="global",
+            gate_init_bias=-10.0  # Force gates closed
+        )
+        model = GatedTransformer(config)
+        input_ids = torch.randint(0, 1000, (2, 8))
+        outputs = model(input_ids)
+        loss = outputs['logits'].sum()
+        loss.backward()
+        for layer in model.layers:
+            assert layer.attention_gate.gate_param.grad is not None
+            assert layer.ff_gate.gate_param.grad is not None 
