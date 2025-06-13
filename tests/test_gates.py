@@ -642,5 +642,69 @@ class TestGateIntegration:
         assert hasattr(layer_no_gates, 'ff_gate')
 
 
+class TestRecomputationGateValidation:
+    """Comprehensive validation of RecomputationGate behavior."""
+    
+    def test_gate_output_range(self):
+        """Gate output should always be in [0, 1] (probability)."""
+        from src.models.gates import RecomputationGate
+        gate = RecomputationGate(hidden_size=32, gate_type="global")
+        x = torch.randn(4, 8, 32)
+        gate.train()
+        out, _ = gate(x)
+        assert torch.all((out >= 0) & (out <= 1))
+    
+    def test_gate_extreme_bias(self):
+        """Gate with high positive/negative bias should saturate to 1/0."""
+        from src.models.gates import RecomputationGate
+        # High positive bias
+        gate_open = RecomputationGate(hidden_size=32, gate_type="global", init_bias=10.0)
+        x = torch.randn(2, 4, 32)
+        out_open, _ = gate_open(x)
+        assert torch.all(out_open > 0.99)
+        # High negative bias
+        gate_closed = RecomputationGate(hidden_size=32, gate_type="global", init_bias=-10.0)
+        out_closed, _ = gate_closed(x)
+        assert torch.all(out_closed < 0.01)
+    
+    def test_gate_temperature_effect(self):
+        """Lower temperature should make gate output more binary."""
+        from src.models.gates import RecomputationGate
+        gate_soft = RecomputationGate(hidden_size=32, gate_type="global", temperature=2.0)
+        gate_hard = RecomputationGate(hidden_size=32, gate_type="global", temperature=0.1)
+        x = torch.randn(2, 4, 32)
+        out_soft, _ = gate_soft(x)
+        out_hard, _ = gate_hard(x)
+        # Harder gate should have more outputs near 0 or 1
+        frac_hard = ((out_hard < 0.05) | (out_hard > 0.95)).float().mean()
+        frac_soft = ((out_soft < 0.05) | (out_soft > 0.95)).float().mean()
+        assert frac_hard > frac_soft
+    
+    def test_straight_through_estimator(self):
+        """Straight-through estimator should allow gradients to flow through binary decisions."""
+        from src.models.gates import RecomputationGate
+        gate = RecomputationGate(hidden_size=16, gate_type="global", use_straight_through=True)
+        x = torch.randn(2, 4, 16, requires_grad=True)
+        out, decision = gate(x)
+        # Use decision in a loss
+        loss = decision.sum()
+        loss.backward()
+        assert x.grad is not None
+        assert torch.any(x.grad != 0)
+    
+    def test_no_nan_inf_in_outputs(self):
+        """Gate outputs and gradients should not contain NaN or Inf."""
+        from src.models.gates import RecomputationGate
+        gate = RecomputationGate(hidden_size=16, gate_type="global")
+        x = torch.randn(2, 4, 16, requires_grad=True)
+        out, decision = gate(x)
+        loss = out.sum() + decision.sum()
+        loss.backward()
+        assert not torch.isnan(out).any()
+        assert not torch.isinf(out).any()
+        assert not torch.isnan(x.grad).any()
+        assert not torch.isinf(x.grad).any()
+
+
 if __name__ == "__main__":
     pytest.main([__file__]) 

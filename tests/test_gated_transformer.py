@@ -377,3 +377,117 @@ class TestGatedTransformerDifferentiability:
         for layer in model.layers:
             assert layer.attention_gate.gate_param.grad is not None
             assert layer.ff_gate.gate_param.grad is not None 
+
+
+class TestGatedTransformerIntegrationAndLearning:
+    """Integration and learning dynamics tests for GatedTransformer."""
+    
+    def test_training_step_updates_gate_params(self):
+        """Simulate a training step and check gate parameters update."""
+        import copy
+        config = TransformerConfig(
+            vocab_size=100,
+            hidden_size=32,
+            num_hidden_layers=1,
+            num_attention_heads=4,
+            use_recomputation_gates=True,
+            gate_type="global"
+        )
+        model = GatedTransformer(config)
+        model.train()
+        input_ids = torch.randint(0, 100, (2, 8))
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
+        # Save initial gate params
+        initial_gate = copy.deepcopy([layer.attention_gate.gate_param.clone().detach() for layer in model.layers])
+        # Training step
+        outputs = model(input_ids)
+        loss = outputs['logits'].sum()
+        loss.backward()
+        optimizer.step()
+        # Check that at least one gate param has changed
+        changed = False
+        for i, layer in enumerate(model.layers):
+            if not torch.allclose(layer.attention_gate.gate_param, initial_gate[i]):
+                changed = True
+        assert changed
+    
+    def test_memory_pressure_mode_affects_gates(self):
+        """Changing memory pressure mode should affect gate statistics."""
+        config = TransformerConfig(
+            vocab_size=100,
+            hidden_size=32,
+            num_hidden_layers=1,
+            num_attention_heads=4,
+            use_recomputation_gates=True,
+            gate_type="global"
+        )
+        model = GatedTransformer(config)
+        input_ids = torch.randint(0, 100, (2, 8))
+        # Default (medium)
+        stats_medium = model(input_ids, return_gate_info=True)['gate_statistics']
+        # Set to low (should increase storage prob)
+        model.set_memory_pressure('low')
+        stats_low = model(input_ids, return_gate_info=True)['gate_statistics']
+        # Set to high (should decrease storage prob)
+        model.set_memory_pressure('high')
+        stats_high = model(input_ids, return_gate_info=True)['gate_statistics']
+        # Probabilities should be ordered: low > medium > high
+        assert stats_low['avg_attention_prob'] >= stats_medium['avg_attention_prob']
+        assert stats_medium['avg_attention_prob'] >= stats_high['avg_attention_prob']
+    
+    def test_gate_probabilities_learnable(self):
+        """Gate probabilities should change after several training steps."""
+        config = TransformerConfig(
+            vocab_size=100,
+            hidden_size=32,
+            num_hidden_layers=1,
+            num_attention_heads=4,
+            use_recomputation_gates=True,
+            gate_type="global"
+        )
+        model = GatedTransformer(config)
+        model.train()
+        input_ids = torch.randint(0, 100, (2, 8))
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
+        # Initial gate stats
+        stats_before = model(input_ids, return_gate_info=True)['gate_statistics']
+        avg_before = stats_before['avg_attention_prob']
+        # Run a few training steps
+        for _ in range(5):
+            outputs = model(input_ids)
+            loss = outputs['logits'].sum()
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        stats_after = model(input_ids, return_gate_info=True)['gate_statistics']
+        avg_after = stats_after['avg_attention_prob']
+        # Probabilities should change
+        assert abs(avg_before - avg_after) > 1e-4
+    
+    def test_no_nan_inf_in_training(self):
+        """No NaN or Inf in outputs or gradients during/after training."""
+        config = TransformerConfig(
+            vocab_size=100,
+            hidden_size=32,
+            num_hidden_layers=1,
+            num_attention_heads=4,
+            use_recomputation_gates=True,
+            gate_type="global"
+        )
+        model = GatedTransformer(config)
+        model.train()
+        input_ids = torch.randint(0, 100, (2, 8))
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
+        for _ in range(3):
+            outputs = model(input_ids)
+            loss = outputs['logits'].sum()
+            optimizer.zero_grad()
+            loss.backward()
+            for name, param in model.named_parameters():
+                if param.grad is not None:
+                    assert not torch.isnan(param.grad).any()
+                    assert not torch.isinf(param.grad).any()
+            optimizer.step()
+            for name, param in model.named_parameters():
+                assert not torch.isnan(param.data).any()
+                assert not torch.isinf(param.data).any() 
