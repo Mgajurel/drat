@@ -43,6 +43,12 @@ from .recomputation_hooks import (
     recomputation_context,
     create_recomputation_wrapper
 )
+from .gate_recomputation import (
+    GateTriggeredRecomputation,
+    GatedRecomputationLayer,
+    gate_recomputation_context,
+    create_gated_recomputation_model
+)
 
 __all__ = [
     # Configuration
@@ -81,4 +87,10 @@ __all__ = [
     'ActivationInfo',
     'recomputation_context',
     'create_recomputation_wrapper',
+    
+    # Gate-triggered recomputation
+    'GateTriggeredRecomputation',
+    'GatedRecomputationLayer',
+    'gate_recomputation_context',
+    'create_gated_recomputation_model',
 ] 
