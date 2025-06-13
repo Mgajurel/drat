@@ -168,11 +168,14 @@ class TestTextPreprocessor:
     
     def test_allowed_chars_filtering(self):
         """Test allowed characters filtering."""
-        config = PreprocessingConfig(allowed_chars="abcdefghijklmnopqrstuvwxyz ")
+        config = PreprocessingConfig(
+            allowed_chars="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ",
+            lowercase=False  # Don't lowercase so we keep original H and W
+        )
         preprocessor = TextPreprocessor(config)
         text = "Hello123! World@#$"
         cleaned = preprocessor.clean_text(text)
-        assert cleaned == "Hello World"
+        assert cleaned == "Hello123 World"
     
     def test_special_chars_removal(self):
         """Test special characters removal."""

@@ -136,35 +136,32 @@ class TokenizedDataset(Dataset):
         transform: Optional[Callable] = None
     ):
         """
-        Initialize dataset.
+        Initialize tokenized dataset.
         
         Args:
-            data: Tokenized sequences or path to data file.
-            config: Dataset configuration.
-            transform: Optional transform function to apply to samples.
+            data: Either file path or list of token sequences
+            config: Dataset configuration
+            transform: Optional transform function
         """
         self.config = config
         self.transform = transform
+        
+        # Initialize cache if enabled
         self.cache = {} if config.cache_dataset else None
         
-        # Load or set data
+        # Load data
         if isinstance(data, (str, Path)):
-            self.data_path = Path(data)
-            self.sequences = self._load_from_file(self.data_path)
+            self.sequences = self._load_from_file(Path(data))
         else:
-            self.data_path = None
             self.sequences = data
         
         # Filter sequences by length
         self.sequences = self._filter_sequences(self.sequences)
         
-        # Create index mapping for memory-mapped files
-        self.index_map = list(range(len(self.sequences)))
-        
-        logger.info(f"Loaded dataset with {len(self.sequences)} sequences")
-        
-        # Calculate statistics
+        # Calculate dataset statistics
         self.stats = self._calculate_stats()
+        
+        logger.info(f"Created TokenizedDataset with {len(self.sequences)} sequences")
     
     def _load_from_file(self, file_path: Path) -> List[List[int]]:
         """Load tokenized sequences from file."""
@@ -239,8 +236,14 @@ class TokenizedDataset(Dataset):
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         """Get a single sample."""
-        if self.cache and idx in self.cache:
-            return self.cache[idx]
+        if self.cache is not None and idx in self.cache:
+            # Return a copy of the cached sample to allow for independent modifications
+            cached_sample = self.cache[idx]
+            return {
+                'input_ids': cached_sample['input_ids'].clone(),
+                'length': cached_sample['length'],
+                'original_idx': cached_sample['original_idx']
+            }
         
         sequence = self.sequences[idx]
         
@@ -264,9 +267,13 @@ class TokenizedDataset(Dataset):
         if self.transform:
             sample = self.transform(sample)
         
-        # Cache if enabled
-        if self.cache and len(self.cache) < self.config.max_cache_size:
-            self.cache[idx] = sample
+        # Cache if enabled and not random cropping (which would create different samples each time)
+        if self.cache is not None and len(self.cache) < self.config.max_cache_size and not self.config.random_crop:
+            self.cache[idx] = {
+                'input_ids': sample['input_ids'].clone(),
+                'length': sample['length'],
+                'original_idx': sample['original_idx']
+            }
         
         return sample
     

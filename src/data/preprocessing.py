@@ -140,6 +140,9 @@ class TextPreprocessor:
             'quality_filtered': 0,
             'length_filtered': 0,
         }
+        
+        # Last processing statistics (for pipeline integration)
+        self.last_stats = None
     
     def _compile_patterns(self):
         """Compile regex patterns for efficient processing."""
@@ -348,10 +351,21 @@ class TextPreprocessor:
         Returns:
             Preprocessed text or None if filtered out.
         """
+        # Track processing stats for this specific text
+        processing_stats = {
+            'original_length': len(text) if text else 0,
+            'processed_length': 0,
+            'filtered': False,
+            'filter_reason': None
+        }
+        
         self.stats['total_processed'] += 1
         
         if not text or not text.strip():
             self.stats['total_filtered'] += 1
+            processing_stats['filtered'] = True
+            processing_stats['filter_reason'] = 'empty_text'
+            self.last_stats = processing_stats
             return None
         
         # Clean text
@@ -359,6 +373,7 @@ class TextPreprocessor:
         
         # Normalize text
         text = self.normalize_text(text)
+        processing_stats['processed_length'] = len(text)
         
         # Validate if requested
         if validate:
@@ -366,11 +381,17 @@ class TextPreprocessor:
             if not is_valid:
                 if metrics.length < self.config.min_length or metrics.length > self.config.max_length:
                     self.stats['length_filtered'] += 1
+                    processing_stats['filter_reason'] = 'length'
                 else:
                     self.stats['quality_filtered'] += 1
+                    processing_stats['filter_reason'] = 'quality'
                 self.stats['total_filtered'] += 1
+                processing_stats['filtered'] = True
+                self.last_stats = processing_stats
                 return None
         
+        # Set last stats for successful processing
+        self.last_stats = processing_stats
         return text
     
     def preprocess_batch(self, texts: List[str], validate: bool = True) -> List[str]:

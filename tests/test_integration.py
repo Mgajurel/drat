@@ -144,7 +144,9 @@ class TestBasicIntegration(TestPipelineIntegration):
         assert any(stats.values())  # At least one split should have data
         
         # Test getting dataloaders
-        if stats['train']['num_sequences'] > 0:
+        # Check for either 'num_sequences' (full dataset) or 'num_samples' (split dataset)
+        train_count = stats['train'].get('num_sequences', stats['train'].get('num_samples', 0))
+        if train_count > 0:
             train_dataloader = trained_pipeline.get_dataloader('train')
             assert train_dataloader is not None
             
@@ -458,7 +460,7 @@ class TestMemoryEfficiency(TestPipelineIntegration):
 
 
 # Integration test fixtures and helpers
-@pytest.mark.integration
+# Integration test marker removed to avoid pytest warning
 class TestFullIntegrationWorkflow(TestPipelineIntegration):
     """Test complete integration workflow scenarios."""
     
