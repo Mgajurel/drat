@@ -35,6 +35,14 @@ from .gates import (
     GatedTransformerLayer,
     GateManager
 )
+from .recomputation_hooks import (
+    RecomputationHookManager,
+    CheckpointRecomputationHook,
+    RecomputationStrategy,
+    ActivationInfo,
+    recomputation_context,
+    create_recomputation_wrapper
+)
 
 __all__ = [
     # Configuration
@@ -65,4 +73,12 @@ __all__ = [
     'RecomputationGate',
     'GatedTransformerLayer',
     'GateManager',
+    
+    # Recomputation hooks
+    'RecomputationHookManager',
+    'CheckpointRecomputationHook',
+    'RecomputationStrategy',
+    'ActivationInfo',
+    'recomputation_context',
+    'create_recomputation_wrapper',
 ] 
