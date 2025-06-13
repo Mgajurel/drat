@@ -340,23 +340,24 @@ class ResourceAwareLoss(nn.Module):
             if self.use_real_time_costs or self.cost_model == "real_time":
                 # Use real-time cost tracking
                 cost_metrics = self.compute_real_time_costs(batch_idx)
+                if cost_metrics is not None:
+                    resource_loss = torch.tensor(
+                        cost_metrics.total_resource_cost,
+                        device=logits.device,
+                        requires_grad=True
+                    )
             elif gate_statistics is not None:
-                # Use static cost calculation
+                # Compute resource costs directly with tensor operations to maintain gradients
+                resource_loss = self._compute_resource_loss_tensor(
+                    gate_statistics, logits.device, hidden_size, logits, targets
+                )
+                
+                # Also compute metrics for reporting (without gradients)
                 if hidden_size is None:
-                    hidden_size = logits.size(-1)  # Assume vocab_size ≈ hidden_size for estimation
-                
+                    hidden_size = logits.size(-1)
                 batch_size, seq_len = logits.shape[:2] if logits.dim() == 3 else (logits.shape[0] // targets.numel(), targets.numel())
-                
                 cost_metrics = self.compute_resource_costs(
                     gate_statistics, hidden_size, seq_len, batch_size
-                )
-            
-            # Convert to tensor for gradient computation if we have cost metrics
-            if cost_metrics is not None:
-                resource_loss = torch.tensor(
-                    cost_metrics.total_resource_cost,
-                    device=logits.device,
-                    requires_grad=True
                 )
         
         # Combine losses
@@ -375,6 +376,97 @@ class ResourceAwareLoss(nn.Module):
         
         return total_loss
     
+    def _compute_resource_loss_tensor(
+        self,
+        gate_statistics: Dict[str, Any],
+        device: torch.device,
+        hidden_size: Optional[int],
+        logits: torch.Tensor,
+        targets: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute resource loss directly using tensor operations to maintain gradients.
+        
+        Args:
+            gate_statistics: Gate statistics from model forward pass
+            device: Device for tensor operations
+            hidden_size: Hidden dimension size
+            logits: Model logits (for shape inference)
+            targets: Target labels (for shape inference)
+            
+        Returns:
+            Resource loss tensor with gradients
+        """
+        layer_stats = gate_statistics.get('layer_stats', [])
+        if not layer_stats:
+            return torch.tensor(0.0, device=device, requires_grad=True)
+        
+        # Infer dimensions
+        if hidden_size is None:
+            hidden_size = logits.size(-1)
+        batch_size, seq_len = logits.shape[:2] if logits.dim() == 3 else (logits.shape[0] // targets.numel(), targets.numel())
+        
+        total_resource_cost = torch.tensor(0.0, device=device, requires_grad=True)
+        num_layers = len(layer_stats)
+        
+        for layer_idx, layer_stat in enumerate(layer_stats):
+            # Get gate probabilities (these should be tensors with gradients)
+            g_att = layer_stat.get('attention_gate_prob', torch.tensor(0.5, device=device))
+            g_ff = layer_stat.get('ff_gate_prob', torch.tensor(0.5, device=device))
+            
+            # Ensure gate values are tensors on the correct device
+            if not isinstance(g_att, torch.Tensor):
+                g_att = torch.tensor(float(g_att), device=device, requires_grad=True)
+            if not isinstance(g_ff, torch.Tensor):
+                g_ff = torch.tensor(float(g_ff), device=device, requires_grad=True)
+            
+            # Move to correct device if needed
+            g_att = g_att.to(device)
+            g_ff = g_ff.to(device)
+            
+            # Compute costs based on model
+            if self.cost_model == "activation_size":
+                # Cost proportional to activation tensor size
+                attention_size = batch_size * seq_len * hidden_size
+                ff_size = batch_size * seq_len * hidden_size
+                
+                att_mem_cost = g_att * attention_size * self.memory_cost_base
+                att_recomp_cost = (1 - g_att) * attention_size * self.recomputation_cost_base
+                
+                ff_mem_cost = g_ff * ff_size * self.memory_cost_base
+                ff_recomp_cost = (1 - g_ff) * ff_size * self.recomputation_cost_base
+                
+            elif self.cost_model == "layer_weighted":
+                # Apply layer-specific weights
+                if self.layer_weights and layer_idx < len(self.layer_weights):
+                    weight = self.layer_weights[layer_idx]
+                else:
+                    weight = 1.0 + (layer_idx / num_layers)
+                
+                att_mem_cost = g_att * weight * self.memory_cost_base
+                att_recomp_cost = (1 - g_att) * weight * self.recomputation_cost_base
+                
+                ff_mem_cost = g_ff * weight * self.memory_cost_base
+                ff_recomp_cost = (1 - g_ff) * weight * self.recomputation_cost_base
+                
+            else:  # uniform
+                # Uniform cost across all layers
+                att_mem_cost = g_att * self.memory_cost_base
+                att_recomp_cost = (1 - g_att) * self.recomputation_cost_base
+                
+                ff_mem_cost = g_ff * self.memory_cost_base
+                ff_recomp_cost = (1 - g_ff) * self.recomputation_cost_base
+            
+            # Layer total cost
+            layer_total_cost = att_mem_cost + att_recomp_cost + ff_mem_cost + ff_recomp_cost
+            total_resource_cost = total_resource_cost + layer_total_cost
+        
+        # Normalize if requested
+        if self.normalize_costs and num_layers > 0:
+            total_resource_cost = total_resource_cost / num_layers
+        
+        return total_resource_cost
+
     def set_lambda(self, lambda_resource: float):
         """Update the resource penalty weight."""
         self.lambda_resource = lambda_resource
