@@ -55,7 +55,8 @@ class ResourceAwareLoss(nn.Module):
         cost_model: str = "uniform",
         layer_weights: Optional[List[float]] = None,
         normalize_costs: bool = True,
-        ignore_index: int = -100
+        ignore_index: int = -100,
+        use_real_time_costs: bool = False
     ):
         """
         Initialize resource-aware loss function.
@@ -69,6 +70,7 @@ class ResourceAwareLoss(nn.Module):
             layer_weights: Custom weights per layer (for layer_weighted model)
             normalize_costs: Whether to normalize costs by number of layers
             ignore_index: Index to ignore in task loss calculation
+            use_real_time_costs: Whether to use real-time cost tracking
         """
         super().__init__()
         
@@ -85,9 +87,10 @@ class ResourceAwareLoss(nn.Module):
         self.cost_model = cost_model
         self.layer_weights = layer_weights
         self.normalize_costs = normalize_costs
+        self.use_real_time_costs = use_real_time_costs
         
         # Validate cost model
-        valid_models = ["uniform", "layer_weighted", "activation_size"]
+        valid_models = ["uniform", "layer_weighted", "activation_size", "real_time"]
         if cost_model not in valid_models:
             raise ValueError(f"cost_model must be one of {valid_models}, got {cost_model}")
     
@@ -212,13 +215,104 @@ class ResourceAwareLoss(nn.Module):
             layer_costs=layer_costs
         )
     
+    def compute_real_time_costs(self, batch_idx: Optional[int] = None) -> CostMetrics:
+        """
+        Compute costs using real-time tracking data.
+        
+        Args:
+            batch_idx: Specific batch index to analyze (default: latest)
+            
+        Returns:
+            CostMetrics based on real-time measurements
+        """
+        try:
+            from .cost_tracker import get_global_cost_tracker
+            
+            tracker = get_global_cost_tracker()
+            
+            if not tracker.batch_costs:
+                # No real-time data available, return empty metrics
+                return CostMetrics(
+                    memory_cost=0.0,
+                    recomputation_cost=0.0,
+                    total_resource_cost=0.0,
+                    gate_statistics={},
+                    layer_costs=[]
+                )
+            
+            # Get the specified batch or the latest one
+            if batch_idx is not None:
+                batch_metrics = next(
+                    (b for b in tracker.batch_costs if b.batch_idx == batch_idx),
+                    tracker.batch_costs[-1]
+                )
+            else:
+                batch_metrics = tracker.batch_costs[-1]
+            
+            # Convert real-time metrics to CostMetrics format
+            layer_costs = []
+            total_memory_cost = 0.0
+            total_recomputation_cost = 0.0
+            
+            for layer_cost in batch_metrics.layer_costs:
+                # Use actual measured memory and time costs
+                memory_cost = layer_cost.total_memory_mb * self.memory_cost_base
+                
+                # Estimate recomputation cost based on gate decisions and execution time
+                gate_decisions = layer_cost.gate_decisions
+                avg_gate_prob = (
+                    gate_decisions.get('attention_prob', 0.5) + 
+                    gate_decisions.get('ff_prob', 0.5)
+                ) / 2.0
+                
+                # Recomputation cost inversely related to storage probability
+                recomp_cost = (1 - avg_gate_prob) * layer_cost.total_time_ms * self.recomputation_cost_base
+                
+                layer_costs.append({
+                    'layer_idx': layer_cost.layer_idx,
+                    'attention_gate_prob': gate_decisions.get('attention_prob', 0.5),
+                    'ff_gate_prob': gate_decisions.get('ff_prob', 0.5),
+                    'memory_cost': float(memory_cost),
+                    'recomputation_cost': float(recomp_cost),
+                    'total_cost': float(memory_cost + recomp_cost),
+                    'measured_time_ms': layer_cost.total_time_ms,
+                    'measured_memory_mb': layer_cost.total_memory_mb
+                })
+                
+                total_memory_cost += memory_cost
+                total_recomputation_cost += recomp_cost
+            
+            # Normalize if requested
+            if self.normalize_costs and len(layer_costs) > 0:
+                total_memory_cost /= len(layer_costs)
+                total_recomputation_cost /= len(layer_costs)
+            
+            return CostMetrics(
+                memory_cost=float(total_memory_cost),
+                recomputation_cost=float(total_recomputation_cost),
+                total_resource_cost=float(total_memory_cost + total_recomputation_cost),
+                gate_statistics={'real_time_batch_idx': batch_metrics.batch_idx},
+                layer_costs=layer_costs
+            )
+            
+        except ImportError:
+            logger.warning("Cost tracker not available, falling back to static cost calculation")
+            return CostMetrics(
+                memory_cost=0.0,
+                recomputation_cost=0.0,
+                total_resource_cost=0.0,
+                gate_statistics={},
+                layer_costs=[]
+            )
+    
     def forward(
         self,
         logits: torch.Tensor,
         targets: torch.Tensor,
         gate_statistics: Optional[Dict[str, Any]] = None,
         hidden_size: Optional[int] = None,
-        return_metrics: bool = False
+        return_metrics: bool = False,
+        batch_idx: Optional[int] = None
     ) -> Union[torch.Tensor, tuple]:
         """
         Compute resource-aware loss.
@@ -229,6 +323,7 @@ class ResourceAwareLoss(nn.Module):
             gate_statistics: Gate statistics from model forward pass
             hidden_size: Hidden dimension size (for cost calculation)
             return_metrics: Whether to return detailed metrics
+            batch_idx: Batch index for real-time cost tracking
             
         Returns:
             Loss tensor or tuple of (loss, metrics) if return_metrics=True
@@ -241,24 +336,28 @@ class ResourceAwareLoss(nn.Module):
         cost_metrics = None
         
         # Compute resource costs if gate statistics are provided
-        if gate_statistics is not None and self.lambda_resource > 0:
-            # Infer dimensions from logits if not provided
-            if hidden_size is None:
-                hidden_size = logits.size(-1)  # Assume vocab_size ≈ hidden_size for estimation
+        if self.lambda_resource > 0:
+            if self.use_real_time_costs or self.cost_model == "real_time":
+                # Use real-time cost tracking
+                cost_metrics = self.compute_real_time_costs(batch_idx)
+            elif gate_statistics is not None:
+                # Use static cost calculation
+                if hidden_size is None:
+                    hidden_size = logits.size(-1)  # Assume vocab_size ≈ hidden_size for estimation
+                
+                batch_size, seq_len = logits.shape[:2] if logits.dim() == 3 else (logits.shape[0] // targets.numel(), targets.numel())
+                
+                cost_metrics = self.compute_resource_costs(
+                    gate_statistics, hidden_size, seq_len, batch_size
+                )
             
-            batch_size, seq_len = logits.shape[:2] if logits.dim() == 3 else (logits.shape[0] // targets.numel(), targets.numel())
-            
-            # Compute cost metrics
-            cost_metrics = self.compute_resource_costs(
-                gate_statistics, hidden_size, seq_len, batch_size
-            )
-            
-            # Convert to tensor for gradient computation
-            resource_loss = torch.tensor(
-                cost_metrics.total_resource_cost,
-                device=logits.device,
-                requires_grad=True
-            )
+            # Convert to tensor for gradient computation if we have cost metrics
+            if cost_metrics is not None:
+                resource_loss = torch.tensor(
+                    cost_metrics.total_resource_cost,
+                    device=logits.device,
+                    requires_grad=True
+                )
         
         # Combine losses
         total_loss = task_loss + self.lambda_resource * resource_loss
@@ -269,7 +368,8 @@ class ResourceAwareLoss(nn.Module):
                 'resource_loss': float(resource_loss.item()),
                 'total_loss': float(total_loss.item()),
                 'lambda_resource': self.lambda_resource,
-                'cost_metrics': cost_metrics
+                'cost_metrics': cost_metrics,
+                'cost_model': self.cost_model
             }
             return total_loss, metrics
         
@@ -279,6 +379,17 @@ class ResourceAwareLoss(nn.Module):
         """Update the resource penalty weight."""
         self.lambda_resource = lambda_resource
     
+    def set_cost_model(self, cost_model: str):
+        """Update the cost calculation model."""
+        valid_models = ["uniform", "layer_weighted", "activation_size", "real_time"]
+        if cost_model not in valid_models:
+            raise ValueError(f"cost_model must be one of {valid_models}, got {cost_model}")
+        self.cost_model = cost_model
+    
+    def enable_real_time_costs(self, enable: bool = True):
+        """Enable or disable real-time cost tracking."""
+        self.use_real_time_costs = enable
+    
     def get_config(self) -> Dict[str, Any]:
         """Get loss function configuration."""
         return {
@@ -287,5 +398,6 @@ class ResourceAwareLoss(nn.Module):
             'recomputation_cost_base': self.recomputation_cost_base,
             'cost_model': self.cost_model,
             'layer_weights': self.layer_weights,
-            'normalize_costs': self.normalize_costs
+            'normalize_costs': self.normalize_costs,
+            'use_real_time_costs': self.use_real_time_costs
         } 

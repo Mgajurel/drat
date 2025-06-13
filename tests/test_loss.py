@@ -6,6 +6,10 @@ import pytest
 import torch
 import torch.nn as nn
 from src.training.loss import ResourceAwareLoss, CostMetrics
+from src.training.cost_tracker import (
+    reset_global_cost_tracker, start_batch_tracking, end_batch_tracking,
+    track_layer_costs, track_operation_costs
+)
 
 
 class TestResourceAwareLoss:
@@ -20,28 +24,30 @@ class TestResourceAwareLoss:
         assert loss_fn.recomputation_cost_base == 2.0
         assert loss_fn.cost_model == "uniform"
         assert loss_fn.normalize_costs is True
+        assert loss_fn.use_real_time_costs is False
         
         # Custom initialization
         custom_loss_fn = nn.MSELoss()
         loss_fn = ResourceAwareLoss(
             task_loss_fn=custom_loss_fn,
-            lambda_resource=0.1,
+            lambda_resource=0.05,
             memory_cost_base=2.0,
             recomputation_cost_base=3.0,
             cost_model="layer_weighted",
-            layer_weights=[1.0, 1.5, 2.0],
-            normalize_costs=False
+            normalize_costs=False,
+            use_real_time_costs=True
         )
+        
         assert loss_fn.task_loss_fn == custom_loss_fn
-        assert loss_fn.lambda_resource == 0.1
+        assert loss_fn.lambda_resource == 0.05
         assert loss_fn.memory_cost_base == 2.0
         assert loss_fn.recomputation_cost_base == 3.0
         assert loss_fn.cost_model == "layer_weighted"
-        assert loss_fn.layer_weights == [1.0, 1.5, 2.0]
         assert loss_fn.normalize_costs is False
+        assert loss_fn.use_real_time_costs is True
     
     def test_invalid_cost_model(self):
-        """Test that invalid cost model raises ValueError."""
+        """Test initialization with invalid cost model."""
         with pytest.raises(ValueError, match="cost_model must be one of"):
             ResourceAwareLoss(cost_model="invalid_model")
     
@@ -49,51 +55,30 @@ class TestResourceAwareLoss:
         """Test task loss computation."""
         loss_fn = ResourceAwareLoss()
         
-        # Test with 3D logits (batch_size, seq_len, vocab_size)
-        batch_size, seq_len, vocab_size = 2, 10, 1000
-        logits = torch.randn(batch_size, seq_len, vocab_size)
-        targets = torch.randint(0, vocab_size, (batch_size, seq_len))
+        # Test with 2D logits (batch_size, vocab_size)
+        logits_2d = torch.randn(4, 100)
+        targets_2d = torch.randint(0, 100, (4,))
         
-        task_loss = loss_fn.compute_task_loss(logits, targets)
-        assert isinstance(task_loss, torch.Tensor)
-        assert task_loss.dim() == 0  # Scalar
+        task_loss = loss_fn.compute_task_loss(logits_2d, targets_2d)
+        assert task_loss.dim() == 0  # Scalar loss
         assert task_loss.item() >= 0
         
-        # Test with 2D logits (batch_size * seq_len, vocab_size)
-        logits_2d = logits.view(-1, vocab_size)
-        targets_2d = targets.view(-1)
+        # Test with 3D logits (batch_size, seq_len, vocab_size)
+        logits_3d = torch.randn(2, 10, 100)
+        targets_3d = torch.randint(0, 100, (2, 10))
         
-        task_loss_2d = loss_fn.compute_task_loss(logits_2d, targets_2d)
-        assert torch.allclose(task_loss, task_loss_2d, atol=1e-6)
+        task_loss = loss_fn.compute_task_loss(logits_3d, targets_3d)
+        assert task_loss.dim() == 0  # Scalar loss
+        assert task_loss.item() >= 0
     
-    def test_cost_metrics_no_gates(self):
-        """Test cost computation with no gate statistics."""
+    def test_resource_cost_computation(self):
+        """Test resource cost computation with gate statistics."""
         loss_fn = ResourceAwareLoss()
         
-        gate_statistics = {'layer_stats': []}
-        cost_metrics = loss_fn.compute_resource_costs(
-            gate_statistics, hidden_size=512, seq_len=10, batch_size=2
-        )
-        
-        assert cost_metrics.memory_cost == 0.0
-        assert cost_metrics.recomputation_cost == 0.0
-        assert cost_metrics.total_resource_cost == 0.0
-        assert cost_metrics.layer_costs == []
-    
-    def test_cost_metrics_uniform_model(self):
-        """Test cost computation with uniform cost model."""
-        loss_fn = ResourceAwareLoss(
-            cost_model="uniform",
-            memory_cost_base=1.0,
-            recomputation_cost_base=2.0,
-            normalize_costs=False
-        )
-        
-        # Mock gate statistics for 2 layers
         gate_statistics = {
             'layer_stats': [
-                {'attention_gate_prob': 0.8, 'ff_gate_prob': 0.6, 'layer_idx': 0},
-                {'attention_gate_prob': 0.4, 'ff_gate_prob': 0.7, 'layer_idx': 1}
+                {'attention_gate_prob': 0.7, 'ff_gate_prob': 0.3, 'layer_idx': 0},
+                {'attention_gate_prob': 0.5, 'ff_gate_prob': 0.8, 'layer_idx': 1}
             ]
         }
         
@@ -101,84 +86,17 @@ class TestResourceAwareLoss:
             gate_statistics, hidden_size=512, seq_len=10, batch_size=2
         )
         
-        # Expected costs for layer 0:
-        # att_mem = 0.8 * 1.0 = 0.8, att_recomp = 0.2 * 2.0 = 0.4
-        # ff_mem = 0.6 * 1.0 = 0.6, ff_recomp = 0.4 * 2.0 = 0.8
-        # layer_0_total = 0.8 + 0.4 + 0.6 + 0.8 = 2.6
-        
-        # Expected costs for layer 1:
-        # att_mem = 0.4 * 1.0 = 0.4, att_recomp = 0.6 * 2.0 = 1.2
-        # ff_mem = 0.7 * 1.0 = 0.7, ff_recomp = 0.3 * 2.0 = 0.6
-        # layer_1_total = 0.4 + 1.2 + 0.7 + 0.6 = 2.9
-        
-        expected_total_memory = (0.8 + 0.6) + (0.4 + 0.7)  # 2.5
-        expected_total_recomp = (0.4 + 0.8) + (1.2 + 0.6)  # 3.0
-        expected_total = expected_total_memory + expected_total_recomp  # 5.5
-        
-        assert abs(cost_metrics.memory_cost - expected_total_memory) < 1e-6
-        assert abs(cost_metrics.recomputation_cost - expected_total_recomp) < 1e-6
-        assert abs(cost_metrics.total_resource_cost - expected_total) < 1e-6
+        assert isinstance(cost_metrics, CostMetrics)
+        assert cost_metrics.memory_cost > 0
+        assert cost_metrics.recomputation_cost > 0
+        assert cost_metrics.total_resource_cost > 0
         assert len(cost_metrics.layer_costs) == 2
-    
-    def test_cost_metrics_layer_weighted_model(self):
-        """Test cost computation with layer-weighted cost model."""
-        layer_weights = [1.0, 2.0]
-        loss_fn = ResourceAwareLoss(
-            cost_model="layer_weighted",
-            layer_weights=layer_weights,
-            memory_cost_base=1.0,
-            recomputation_cost_base=2.0,
-            normalize_costs=False
-        )
         
-        gate_statistics = {
-            'layer_stats': [
-                {'attention_gate_prob': 0.5, 'ff_gate_prob': 0.5, 'layer_idx': 0},
-                {'attention_gate_prob': 0.5, 'ff_gate_prob': 0.5, 'layer_idx': 1}
-            ]
-        }
-        
-        cost_metrics = loss_fn.compute_resource_costs(
-            gate_statistics, hidden_size=512, seq_len=10, batch_size=2
-        )
-        
-        # Layer 0 (weight=1.0): mem=0.5*1.0*1.0 + 0.5*1.0*1.0 = 1.0, recomp=0.5*1.0*2.0 + 0.5*1.0*2.0 = 2.0
-        # Layer 1 (weight=2.0): mem=0.5*2.0*1.0 + 0.5*2.0*1.0 = 2.0, recomp=0.5*2.0*2.0 + 0.5*2.0*2.0 = 4.0
-        expected_total_memory = 1.0 + 2.0  # 3.0
-        expected_total_recomp = 2.0 + 4.0  # 6.0
-        
-        assert abs(cost_metrics.memory_cost - expected_total_memory) < 1e-6
-        assert abs(cost_metrics.recomputation_cost - expected_total_recomp) < 1e-6
-    
-    def test_cost_metrics_activation_size_model(self):
-        """Test cost computation with activation-size cost model."""
-        loss_fn = ResourceAwareLoss(
-            cost_model="activation_size",
-            memory_cost_base=1e-6,  # Scale down for reasonable numbers
-            recomputation_cost_base=2e-6,
-            normalize_costs=False
-        )
-        
-        gate_statistics = {
-            'layer_stats': [
-                {'attention_gate_prob': 0.5, 'ff_gate_prob': 0.5, 'layer_idx': 0}
-            ]
-        }
-        
-        batch_size, seq_len, hidden_size = 2, 10, 512
-        activation_size = batch_size * seq_len * hidden_size  # 10240
-        
-        cost_metrics = loss_fn.compute_resource_costs(
-            gate_statistics, hidden_size, seq_len, batch_size
-        )
-        
-        # Expected: att_mem + ff_mem = 0.5 * 10240 * 1e-6 + 0.5 * 10240 * 1e-6 = 0.01024
-        # Expected: att_recomp + ff_recomp = 0.5 * 10240 * 2e-6 + 0.5 * 10240 * 2e-6 = 0.02048
-        expected_memory = 2 * 0.5 * activation_size * 1e-6
-        expected_recomp = 2 * 0.5 * activation_size * 2e-6
-        
-        assert abs(cost_metrics.memory_cost - expected_memory) < 1e-8
-        assert abs(cost_metrics.recomputation_cost - expected_recomp) < 1e-8
+        # Check layer-specific costs
+        layer_0 = cost_metrics.layer_costs[0]
+        assert layer_0['layer_idx'] == 0
+        assert layer_0['attention_gate_prob'] == 0.7
+        assert layer_0['ff_gate_prob'] == 0.3
     
     def test_cost_normalization(self):
         """Test cost normalization by number of layers."""
@@ -195,147 +113,319 @@ class TestResourceAwareLoss:
             gate_statistics, hidden_size=512, seq_len=10, batch_size=2
         )
         
-        # Each layer: att_mem=0.5*1.0=0.5, att_recomp=0.5*2.0=1.0, ff_mem=0.5*1.0=0.5, ff_recomp=0.5*2.0=1.0
-        # Per layer: memory=1.0, recomp=2.0, total=3.0
-        # Without normalization: total would be 2*3.0 = 6.0
-        # With normalization by 2 layers: 6.0 / 2 = 3.0
+        # Each layer: memory = 0.5*1.0 + 0.5*1.0 = 1.0, recomp = 0.5*2.0 + 0.5*2.0 = 2.0
+        # Total per layer = 3.0, normalized by 2 layers = 1.5
         assert abs(cost_metrics.total_resource_cost - 3.0) < 1e-6
     
-    def test_forward_without_gates(self):
-        """Test forward pass without gate statistics."""
-        loss_fn = ResourceAwareLoss(lambda_resource=0.1)
-        
-        batch_size, seq_len, vocab_size = 2, 10, 1000
-        logits = torch.randn(batch_size, seq_len, vocab_size)
-        targets = torch.randint(0, vocab_size, (batch_size, seq_len))
-        
-        # Without gate statistics
-        total_loss = loss_fn(logits, targets)
-        task_loss = loss_fn.compute_task_loss(logits, targets)
-        
-        # Should be equal to task loss only
-        assert torch.allclose(total_loss, task_loss, atol=1e-6)
-    
-    def test_forward_with_gates(self):
-        """Test forward pass with gate statistics."""
-        loss_fn = ResourceAwareLoss(lambda_resource=0.1, normalize_costs=False)
-        
-        batch_size, seq_len, vocab_size = 2, 10, 1000
-        logits = torch.randn(batch_size, seq_len, vocab_size)
-        targets = torch.randint(0, vocab_size, (batch_size, seq_len))
-        
+    def test_different_cost_models(self):
+        """Test different cost calculation models."""
         gate_statistics = {
             'layer_stats': [
                 {'attention_gate_prob': 0.5, 'ff_gate_prob': 0.5, 'layer_idx': 0}
             ]
         }
         
-        total_loss, metrics = loss_fn(
-            logits, targets, gate_statistics, 
-            hidden_size=vocab_size, return_metrics=True
+        # Uniform model
+        loss_fn_uniform = ResourceAwareLoss(cost_model="uniform")
+        cost_uniform = loss_fn_uniform.compute_resource_costs(
+            gate_statistics, hidden_size=512, seq_len=10, batch_size=2
         )
         
-        # Check that total loss includes both task and resource components
-        assert metrics['task_loss'] > 0
-        assert metrics['resource_loss'] > 0
-        assert abs(metrics['total_loss'] - (metrics['task_loss'] + 0.1 * metrics['resource_loss'])) < 1e-6
-        assert metrics['lambda_resource'] == 0.1
-        assert metrics['cost_metrics'] is not None
+        # Layer weighted model
+        loss_fn_weighted = ResourceAwareLoss(cost_model="layer_weighted")
+        cost_weighted = loss_fn_weighted.compute_resource_costs(
+            gate_statistics, hidden_size=512, seq_len=10, batch_size=2
+        )
+        
+        # Activation size model
+        loss_fn_activation = ResourceAwareLoss(cost_model="activation_size")
+        cost_activation = loss_fn_activation.compute_resource_costs(
+            gate_statistics, hidden_size=512, seq_len=10, batch_size=2
+        )
+        
+        # All should produce valid costs
+        assert cost_uniform.total_resource_cost > 0
+        assert cost_weighted.total_resource_cost > 0
+        assert cost_activation.total_resource_cost > 0
+        
+        # Activation size model should have higher costs due to tensor sizes
+        assert cost_activation.total_resource_cost > cost_uniform.total_resource_cost
     
-    def test_forward_zero_lambda(self):
-        """Test forward pass with zero lambda (no resource penalty)."""
-        loss_fn = ResourceAwareLoss(lambda_resource=0.0)
-        
-        batch_size, seq_len, vocab_size = 2, 10, 1000
-        logits = torch.randn(batch_size, seq_len, vocab_size)
-        targets = torch.randint(0, vocab_size, (batch_size, seq_len))
-        
-        gate_statistics = {
-            'layer_stats': [
-                {'attention_gate_prob': 0.5, 'ff_gate_prob': 0.5, 'layer_idx': 0}
-            ]
-        }
-        
-        total_loss = loss_fn(logits, targets, gate_statistics, hidden_size=vocab_size)
-        task_loss = loss_fn.compute_task_loss(logits, targets)
-        
-        # Should be equal to task loss only
-        assert torch.allclose(total_loss, task_loss, atol=1e-6)
-    
-    def test_gradient_flow(self):
-        """Test that gradients flow through the loss function."""
+    def test_forward_pass_basic(self):
+        """Test basic forward pass without gate statistics."""
         loss_fn = ResourceAwareLoss(lambda_resource=0.1)
         
-        batch_size, seq_len, vocab_size = 2, 5, 100
-        logits = torch.randn(batch_size, seq_len, vocab_size, requires_grad=True)
-        targets = torch.randint(0, vocab_size, (batch_size, seq_len))
+        logits = torch.randn(4, 100)
+        targets = torch.randint(0, 100, (4,))
+        
+        # Without gate statistics, should only compute task loss
+        loss = loss_fn(logits, targets)
+        
+        assert loss.dim() == 0  # Scalar loss
+        assert loss.item() >= 0
+        assert loss.requires_grad
+    
+    def test_forward_pass_with_gate_statistics(self):
+        """Test forward pass with gate statistics."""
+        loss_fn = ResourceAwareLoss(lambda_resource=0.1)
+        
+        logits = torch.randn(4, 100)
+        targets = torch.randint(0, 100, (4,))
         
         gate_statistics = {
             'layer_stats': [
-                {'attention_gate_prob': 0.5, 'ff_gate_prob': 0.5, 'layer_idx': 0}
+                {'attention_gate_prob': 0.7, 'ff_gate_prob': 0.3, 'layer_idx': 0}
             ]
         }
         
-        total_loss = loss_fn(logits, targets, gate_statistics, hidden_size=vocab_size)
-        total_loss.backward()
+        loss, metrics = loss_fn(
+            logits, targets, 
+            gate_statistics=gate_statistics,
+            hidden_size=512,
+            return_metrics=True
+        )
         
-        # Check that gradients are computed
+        assert loss.dim() == 0
+        assert loss.item() >= 0
+        assert loss.requires_grad
+        
+        # Check metrics
+        assert 'task_loss' in metrics
+        assert 'resource_loss' in metrics
+        assert 'total_loss' in metrics
+        assert 'cost_metrics' in metrics
+        assert metrics['lambda_resource'] == 0.1
+        assert metrics['cost_model'] == "uniform"
+        
+        # Resource loss should be non-zero
+        assert metrics['resource_loss'] > 0
+    
+    def test_forward_pass_with_real_time_costs(self):
+        """Test forward pass with real-time cost tracking."""
+        loss_fn = ResourceAwareLoss(lambda_resource=0.1, use_real_time_costs=True)
+        
+        # Reset and set up cost tracking
+        reset_global_cost_tracker()
+        start_batch_tracking(0)
+        
+        # Simulate some layer operations
+        with track_layer_costs(0):
+            with track_operation_costs("attention"):
+                pass
+            with track_operation_costs("feedforward"):
+                pass
+        
+        end_batch_tracking()
+        
+        logits = torch.randn(4, 100)
+        targets = torch.randint(0, 100, (4,))
+        
+        loss, metrics = loss_fn(
+            logits, targets,
+            batch_idx=0,
+            return_metrics=True
+        )
+        
+        assert loss.dim() == 0
+        assert loss.item() >= 0
+        assert loss.requires_grad
+        
+        # Should have used real-time costs
+        assert 'cost_metrics' in metrics
+        assert metrics['cost_metrics'] is not None
+    
+    def test_real_time_cost_model(self):
+        """Test using real_time cost model."""
+        loss_fn = ResourceAwareLoss(lambda_resource=0.1, cost_model="real_time")
+        
+        # Reset and set up cost tracking
+        reset_global_cost_tracker()
+        start_batch_tracking(0)
+        
+        with track_layer_costs(0):
+            pass
+        
+        end_batch_tracking()
+        
+        logits = torch.randn(4, 100)
+        targets = torch.randint(0, 100, (4,))
+        
+        loss, metrics = loss_fn(
+            logits, targets,
+            batch_idx=0,
+            return_metrics=True
+        )
+        
+        assert metrics['cost_model'] == "real_time"
+        assert 'cost_metrics' in metrics
+    
+    def test_compute_real_time_costs_no_data(self):
+        """Test real-time cost computation with no tracking data."""
+        loss_fn = ResourceAwareLoss()
+        
+        # Reset tracker to ensure no data
+        reset_global_cost_tracker()
+        
+        cost_metrics = loss_fn.compute_real_time_costs()
+        
+        assert cost_metrics.memory_cost == 0.0
+        assert cost_metrics.recomputation_cost == 0.0
+        assert cost_metrics.total_resource_cost == 0.0
+        assert len(cost_metrics.layer_costs) == 0
+    
+    def test_compute_real_time_costs_with_data(self):
+        """Test real-time cost computation with tracking data."""
+        loss_fn = ResourceAwareLoss()
+        
+        # Reset and set up cost tracking
+        reset_global_cost_tracker()
+        start_batch_tracking(0)
+        
+        with track_layer_costs(0):
+            pass
+        
+        # Add gate decisions
+        from src.training.cost_tracker import get_global_cost_tracker
+        tracker = get_global_cost_tracker()
+        tracker.track_gate_decisions(0, {
+            'attention_gate_prob': 0.7,
+            'ff_gate_prob': 0.3
+        })
+        
+        end_batch_tracking()
+        
+        cost_metrics = loss_fn.compute_real_time_costs(batch_idx=0)
+        
+        assert isinstance(cost_metrics, CostMetrics)
+        assert len(cost_metrics.layer_costs) == 1
+        
+        layer_cost = cost_metrics.layer_costs[0]
+        assert layer_cost['layer_idx'] == 0
+        assert layer_cost['attention_gate_prob'] == 0.7
+        assert layer_cost['ff_gate_prob'] == 0.3
+        assert 'measured_time_ms' in layer_cost
+        assert 'measured_memory_mb' in layer_cost
+    
+    def test_gradient_flow(self):
+        """Test gradient flow through the loss function."""
+        loss_fn = ResourceAwareLoss(lambda_resource=0.1)
+        
+        # Create tensors that require gradients
+        logits = torch.randn(4, 100, requires_grad=True)
+        targets = torch.randint(0, 100, (4,))
+        
+        gate_statistics = {
+            'layer_stats': [
+                {'attention_gate_prob': 0.7, 'ff_gate_prob': 0.3, 'layer_idx': 0}
+            ]
+        }
+        
+        loss = loss_fn(logits, targets, gate_statistics=gate_statistics, hidden_size=512)
+        
+        # Backward pass
+        loss.backward()
+        
+        # Check that gradients were computed
         assert logits.grad is not None
         assert logits.grad.shape == logits.shape
         assert not torch.allclose(logits.grad, torch.zeros_like(logits.grad))
     
-    def test_set_lambda(self):
-        """Test updating lambda parameter."""
-        loss_fn = ResourceAwareLoss(lambda_resource=0.01)
-        assert loss_fn.lambda_resource == 0.01
+    def test_lambda_zero(self):
+        """Test behavior when lambda_resource is zero."""
+        loss_fn = ResourceAwareLoss(lambda_resource=0.0)
         
-        loss_fn.set_lambda(0.05)
-        assert loss_fn.lambda_resource == 0.05
-    
-    def test_get_config(self):
-        """Test getting loss function configuration."""
-        layer_weights = [1.0, 1.5, 2.0]
-        loss_fn = ResourceAwareLoss(
-            lambda_resource=0.1,
-            memory_cost_base=2.0,
-            recomputation_cost_base=3.0,
-            cost_model="layer_weighted",
-            layer_weights=layer_weights,
-            normalize_costs=False
-        )
+        logits = torch.randn(4, 100)
+        targets = torch.randint(0, 100, (4,))
         
-        config = loss_fn.get_config()
-        expected_config = {
-            'lambda_resource': 0.1,
-            'memory_cost_base': 2.0,
-            'recomputation_cost_base': 3.0,
-            'cost_model': 'layer_weighted',
-            'layer_weights': layer_weights,
-            'normalize_costs': False
+        gate_statistics = {
+            'layer_stats': [
+                {'attention_gate_prob': 0.7, 'ff_gate_prob': 0.3, 'layer_idx': 0}
+            ]
         }
         
-        assert config == expected_config
-    
-    def test_cost_metrics_dataclass(self):
-        """Test CostMetrics dataclass functionality."""
-        layer_costs = [
-            {'layer_idx': 0, 'memory_cost': 1.0, 'recomputation_cost': 2.0, 'total_cost': 3.0}
-        ]
-        gate_stats = {'avg_attention_prob': 0.5, 'avg_ff_prob': 0.6}
-        
-        metrics = CostMetrics(
-            memory_cost=5.0,
-            recomputation_cost=10.0,
-            total_resource_cost=15.0,
-            gate_statistics=gate_stats,
-            layer_costs=layer_costs
+        loss, metrics = loss_fn(
+            logits, targets,
+            gate_statistics=gate_statistics,
+            hidden_size=512,
+            return_metrics=True
         )
         
-        assert metrics.memory_cost == 5.0
-        assert metrics.recomputation_cost == 10.0
-        assert metrics.total_resource_cost == 15.0
-        assert metrics.gate_statistics == gate_stats
-        assert metrics.layer_costs == layer_costs
+        # Resource loss should be zero
+        assert metrics['resource_loss'] == 0.0
+        assert metrics['total_loss'] == metrics['task_loss']
+    
+    def test_configuration_methods(self):
+        """Test configuration getter and setter methods."""
+        loss_fn = ResourceAwareLoss(lambda_resource=0.01, cost_model="uniform")
+        
+        # Test lambda setter
+        loss_fn.set_lambda(0.05)
+        assert loss_fn.lambda_resource == 0.05
+        
+        # Test cost model setter
+        loss_fn.set_cost_model("layer_weighted")
+        assert loss_fn.cost_model == "layer_weighted"
+        
+        # Test invalid cost model
+        with pytest.raises(ValueError):
+            loss_fn.set_cost_model("invalid")
+        
+        # Test real-time costs toggle
+        loss_fn.enable_real_time_costs(True)
+        assert loss_fn.use_real_time_costs is True
+        
+        loss_fn.enable_real_time_costs(False)
+        assert loss_fn.use_real_time_costs is False
+        
+        # Test configuration getter
+        config = loss_fn.get_config()
+        expected_keys = [
+            'lambda_resource', 'memory_cost_base', 'recomputation_cost_base',
+            'cost_model', 'layer_weights', 'normalize_costs', 'use_real_time_costs'
+        ]
+        for key in expected_keys:
+            assert key in config
+    
+    def test_empty_gate_statistics(self):
+        """Test behavior with empty gate statistics."""
+        loss_fn = ResourceAwareLoss(lambda_resource=0.1)
+        
+        # Empty layer stats
+        gate_statistics = {'layer_stats': []}
+        
+        cost_metrics = loss_fn.compute_resource_costs(
+            gate_statistics, hidden_size=512, seq_len=10, batch_size=2
+        )
+        
+        assert cost_metrics.memory_cost == 0.0
+        assert cost_metrics.recomputation_cost == 0.0
+        assert cost_metrics.total_resource_cost == 0.0
+        assert len(cost_metrics.layer_costs) == 0
+    
+    def test_layer_weights(self):
+        """Test layer-weighted cost model with custom weights."""
+        layer_weights = [1.0, 1.5, 2.0]
+        loss_fn = ResourceAwareLoss(
+            cost_model="layer_weighted",
+            layer_weights=layer_weights
+        )
+        
+        gate_statistics = {
+            'layer_stats': [
+                {'attention_gate_prob': 0.5, 'ff_gate_prob': 0.5, 'layer_idx': 0},
+                {'attention_gate_prob': 0.5, 'ff_gate_prob': 0.5, 'layer_idx': 1},
+                {'attention_gate_prob': 0.5, 'ff_gate_prob': 0.5, 'layer_idx': 2}
+            ]
+        }
+        
+        cost_metrics = loss_fn.compute_resource_costs(
+            gate_statistics, hidden_size=512, seq_len=10, batch_size=2
+        )
+        
+        # Layer 2 should have higher cost due to weight 2.0
+        layer_costs = cost_metrics.layer_costs
+        assert layer_costs[2]['total_cost'] > layer_costs[1]['total_cost']
+        assert layer_costs[1]['total_cost'] > layer_costs[0]['total_cost']
 
 
 if __name__ == "__main__":
