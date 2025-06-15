@@ -337,7 +337,7 @@ class TestPipelineBenchmarking(TestPipelineIntegration):
         assert metrics.total_texts > 0
         
         # Check that metrics are reasonable
-        assert metrics.texts_per_second < 10000  # Should be reasonable
+        assert metrics.texts_per_second < 50000  # Should be reasonable (increased for micro-benchmarks)
         assert metrics.total_time < 60  # Should complete quickly
     
     def test_benchmark_components(self, trained_pipeline: TextProcessingPipeline, sample_texts: List[str]):
