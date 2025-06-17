@@ -157,3 +157,7 @@ package-lock.json
 .coverage.xml
 
 test_outputs/
+
+outputs/
+*.pt                          # PyTorch model files
+*.pth                         # PyTorch model files
