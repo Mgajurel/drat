@@ -152,11 +152,10 @@ class RecomputationGate(nn.Module):
         
         return gate_values, binary_decisions
     
-    def get_storage_probability(self) -> float:
-        """Get the current storage probability."""
-        with torch.no_grad():
-            gate_value = torch.sigmoid(self.gate_param / self.temperature)
-            return gate_value.mean().item()
+    def get_storage_probability(self) -> torch.Tensor:
+        """Get the current storage probability as a tensor with gradients."""
+        gate_value = torch.sigmoid(self.gate_param / self.temperature)
+        return gate_value.mean()  # Return tensor, not scalar
     
     def set_storage_probability(self, prob: float):
         """Set the storage probability by adjusting gate parameters."""
@@ -404,7 +403,7 @@ class GatedTransformerLayer(nn.Module):
         self._attention_gate_decision = None
         self._ff_gate_decision = None
     
-    def get_gate_statistics(self) -> Dict[str, float]:
+    def get_gate_statistics(self) -> Dict[str, Any]:
         """Get statistics about gate behavior."""
         return {
             'attention_gate_prob': self.attention_gate.get_storage_probability(),

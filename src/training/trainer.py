@@ -606,8 +606,22 @@ class ResourceAwareTrainer:
         """Update metrics with gate activation statistics."""
         layer_stats = gate_stats.get('layer_stats', [])
         if layer_stats:
-            att_probs = [stats.get('attention_gate_prob', 0.5) for stats in layer_stats]
-            ff_probs = [stats.get('ff_gate_prob', 0.5) for stats in layer_stats]
+            att_probs = []
+            ff_probs = []
+            
+            for stats in layer_stats:
+                # Convert tensor gate probs to float for metrics (no gradients needed for metrics)
+                att_prob = stats.get('attention_gate_prob', 0.5)
+                ff_prob = stats.get('ff_gate_prob', 0.5)
+                
+                # Handle both tensor and scalar cases
+                if isinstance(att_prob, torch.Tensor):
+                    att_prob = att_prob.item()
+                if isinstance(ff_prob, torch.Tensor):
+                    ff_prob = ff_prob.item()
+                    
+                att_probs.append(att_prob)
+                ff_probs.append(ff_prob)
             
             metrics.avg_attention_gate_prob = np.mean(att_probs)
             metrics.avg_ff_gate_prob = np.mean(ff_probs)

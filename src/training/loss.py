@@ -147,6 +147,12 @@ class ResourceAwareLoss(nn.Module):
             g_att = layer_stat.get('attention_gate_prob', 0.5)
             g_ff = layer_stat.get('ff_gate_prob', 0.5)
             
+            # Convert tensors to float for cost calculations (metrics only)
+            if isinstance(g_att, torch.Tensor):
+                g_att = g_att.item()
+            if isinstance(g_ff, torch.Tensor):
+                g_ff = g_ff.item()
+            
             # Compute base costs based on activation sizes
             if self.cost_model == "activation_size":
                 # Cost proportional to activation tensor size
@@ -410,7 +416,7 @@ class ResourceAwareLoss(nn.Module):
         num_layers = len(layer_stats)
         
         for layer_idx, layer_stat in enumerate(layer_stats):
-            # Get gate probabilities (these should be tensors with gradients)
+            # Get gate probabilities (these should now be tensors with gradients)
             g_att = layer_stat.get('attention_gate_prob', torch.tensor(0.5, device=device))
             g_ff = layer_stat.get('ff_gate_prob', torch.tensor(0.5, device=device))
             
