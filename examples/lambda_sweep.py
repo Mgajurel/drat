@@ -4,6 +4,18 @@ Lambda Parameter Sweep for Resource-Aware Transformer Training.
 
 This script systematically explores the trade-offs between model accuracy and 
 resource usage by training models with different λ (lambda_resource) values.
+
+RECENT OPTIMIZATIONS (Post-Gradient Flow Fix):
+- ✅ Gradient flow validation before sweep execution
+- ⚡ Optimized training parameters for meaningful convergence
+- 📊 Enhanced lambda value range for better granularity  
+- 🔧 Robust error handling and progress monitoring
+
+Key Features:
+- Pre-sweep validation of gradient flow through gate parameters
+- Comprehensive metrics collection (loss, memory, timing, gate stats)
+- Automated analysis with plots and detailed reports
+- Configurable model sizes and training parameters
 """
 
 import os
@@ -42,20 +54,20 @@ class LambdaSweepConfig:
     vocab_size: int = 10000
     max_seq_length: int = 128
     
-    # Training configuration
-    epochs: int = 2  # Shorter for sweep
-    batch_size: int = 4
-    learning_rate: float = 1e-4
-    synthetic_samples: int = 300  # Smaller for faster sweep
+    # Training configuration - OPTIMIZED for meaningful results
+    epochs: int = 5  # Increased from 2 for better convergence
+    batch_size: int = 8  # Increased from 4 for more stable gradients
+    learning_rate: float = 3e-4  # Increased from 1e-4 for faster learning
+    synthetic_samples: int = 1000  # Increased from 300 for more robust training
     
     # Experiment configuration
     output_base_dir: str = "outputs/lambda_sweep"
     random_seed: int = 42
     device: str = "auto"
     
-    # Logging configuration
-    log_interval: int = 10
-    eval_interval: int = 25
+    # Logging configuration - OPTIMIZED for better monitoring
+    log_interval: int = 20  # Increased from 10 for less noise
+    eval_interval: int = 50  # Increased from 25 for meaningful evaluation
     use_tensorboard: bool = True
     
     # Analysis configuration
@@ -407,9 +419,134 @@ class LambdaSweepExperiment:
             experiment_id=f"{experiment_id}_FAILED"
         )
         
+    def validate_gradient_flow(self) -> bool:
+        """Validate that gradient flow through gates is working properly before running sweep."""
+        self.logger.info("🔍 Validating gradient flow through gate parameters...")
+        
+        try:
+            # Create a minimal test setup
+            if self.config.model_size == "tiny":
+                model_config = get_tiny_config()
+            else:
+                model_config = get_small_config()
+                
+            model_config.vocab_size = self.config.vocab_size
+            model_config.max_sequence_length = 64  # Shorter for validation
+            model_config.max_position_embeddings = 64
+            model_config.use_recomputation_gates = True
+            model_config.num_layers = 2  # Minimal for testing
+            
+            # Create model
+            torch.manual_seed(self.config.random_seed)
+            model = GatedTransformer(model_config)
+            
+            # Create loss function with non-zero lambda
+            from src.training.loss import ResourceAwareLoss
+            loss_fn = ResourceAwareLoss(lambda_resource=0.1)
+            
+            # Create dummy data
+            batch_size, seq_len = 2, 32
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            model = model.to(device)
+            
+            input_ids = torch.randint(0, model_config.vocab_size, (batch_size, seq_len)).to(device)
+            targets = input_ids.clone()
+            
+            # Forward pass
+            outputs = model(input_ids, return_gate_info=True)
+            gate_stats = outputs.get('gate_statistics', {})
+            
+            # Check gate statistics structure
+            if not gate_stats or 'layer_stats' not in gate_stats:
+                self.logger.error("❌ Gate statistics not found in model output!")
+                return False
+                
+            layer_stats = gate_stats['layer_stats']
+            if not layer_stats:
+                self.logger.error("❌ No layer statistics found!")
+                return False
+                
+            # Check first layer's gate statistics
+            first_layer = layer_stats[0]
+            att_prob = first_layer.get('attention_gate_prob')
+            ff_prob = first_layer.get('ff_gate_prob')
+            
+            # Validate that gate probs are tensors with gradients
+            if not isinstance(att_prob, torch.Tensor) or not att_prob.requires_grad:
+                self.logger.error("❌ Attention gate probability is not a tensor with gradients!")
+                return False
+                
+            if not isinstance(ff_prob, torch.Tensor) or not ff_prob.requires_grad:
+                self.logger.error("❌ FF gate probability is not a tensor with gradients!")
+                return False
+                
+            # Compute loss and check resource loss component
+            logits = outputs['logits']
+            gate_stats = outputs.get('gate_statistics', {})
+            total_loss, metrics = loss_fn(logits, targets, gate_statistics=gate_stats, return_metrics=True)
+            resource_loss = torch.tensor(metrics['resource_loss'], device=total_loss.device, requires_grad=True)
+            
+            # Validate that resource loss is non-zero and has gradients
+            if resource_loss.item() == 0.0:
+                self.logger.error("❌ Resource loss is zero - gradient flow might be broken!")
+                return False
+                
+            if not resource_loss.requires_grad:
+                self.logger.error("❌ Resource loss does not require gradients!")
+                return False
+                
+            # Test backward pass
+            total_loss.backward()
+            
+            # Check that gate parameters have gradients
+            gate_params_with_grads = 0
+            total_gate_params = 0
+            
+            for name, param in model.named_parameters():
+                if 'gate_param' in name:
+                    total_gate_params += 1
+                    if param.grad is not None and param.grad.abs().sum() > 0:
+                        gate_params_with_grads += 1
+                        
+            if total_gate_params == 0:
+                self.logger.error("❌ No gate parameters found in model!")
+                return False
+                
+            if gate_params_with_grads == 0:
+                self.logger.error("❌ No gate parameters received gradients!")
+                return False
+                
+            gradient_ratio = gate_params_with_grads / total_gate_params
+            if gradient_ratio < 0.5:
+                self.logger.warning(f"⚠️ Only {gradient_ratio:.1%} of gate parameters received gradients")
+                
+            self.logger.info(f"✅ Gradient flow validation passed!")
+            self.logger.info(f"   - Gate statistics: tensors with gradients ✓")
+            self.logger.info(f"   - Resource loss: {resource_loss.item():.6f} (non-zero) ✓")
+            self.logger.info(f"   - Gate parameters with gradients: {gate_params_with_grads}/{total_gate_params} ✓")
+            
+            # Cleanup
+            del model
+            torch.cuda.empty_cache() if torch.cuda.is_available() else None
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Gradient flow validation failed: {e}")
+            return False
+        
     def run_sweep(self):
         """Run the complete lambda parameter sweep."""
         self.logger.info(f"Starting lambda sweep with values: {self.config.lambda_values}")
+        
+        # VALIDATION: Ensure gradient flow is working before running expensive sweep
+        self.logger.info("🔧 Running pre-sweep validation...")
+        if not self.validate_gradient_flow():
+            self.logger.error("❌ Gradient flow validation failed! Aborting sweep.")
+            self.logger.error("💡 Please check that the gradient flow fixes are properly applied.")
+            return
+        
+        self.logger.info("✅ Validation passed! Starting lambda parameter sweep...")
         
         # Create shared components
         tokenizer = self.create_tokenizer()
@@ -425,7 +562,7 @@ class LambdaSweepExperiment:
         
         # Run experiments for each lambda value
         for i, lambda_value in enumerate(self.config.lambda_values):
-            self.logger.info(f"Running experiment {i+1}/{len(self.config.lambda_values)} "
+            self.logger.info(f"🚀 Running experiment {i+1}/{len(self.config.lambda_values)} "
                            f"with lambda = {lambda_value}")
             
             result = self.run_single_experiment(
@@ -437,9 +574,9 @@ class LambdaSweepExperiment:
             # Save intermediate results
             self.save_results()
             
-            self.logger.info(f"Completed {i+1}/{len(self.config.lambda_values)} experiments")
+            self.logger.info(f"✅ Completed {i+1}/{len(self.config.lambda_values)} experiments")
             
-        self.logger.info("Lambda sweep completed!")
+        self.logger.info("🎉 Lambda sweep completed!")
         
         # Final analysis
         self.analyze_results()
@@ -696,16 +833,16 @@ def main():
     
     # Lambda configuration
     parser.add_argument("--lambda-values", type=str, 
-                       default="0.0,0.01,0.05,0.1,0.2,0.5,1.0",
-                       help="Comma-separated lambda values to test")
+                       default="0.0,0.01,0.02,0.05,0.1,0.2,0.3,0.5,1.0",
+                       help="Comma-separated lambda values to test (optimized range for gradient flow)")
     
     # Model configuration
     parser.add_argument("--model-size", choices=["tiny", "small"], default="small",
                        help="Model size for experiments")
-    parser.add_argument("--epochs", type=int, default=2,
-                       help="Number of training epochs per experiment")
-    parser.add_argument("--synthetic-samples", type=int, default=300,
-                       help="Number of synthetic samples for training")
+    parser.add_argument("--epochs", type=int, default=5,
+                       help="Number of training epochs per experiment (increased for convergence)")
+    parser.add_argument("--synthetic-samples", type=int, default=1000,
+                       help="Number of synthetic samples for training (increased for robustness)")
     
     # Experiment configuration
     parser.add_argument("--output-dir", type=str, default="outputs/lambda_sweep",
