@@ -1,0 +1,145 @@
+name: ✨ Feature Request
+description: Suggest a new feature or enhancement for DRAT
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting a new feature! ✨
+        Your ideas help make DRAT better for everyone.
+
+  - type: textarea
+    id: feature_description
+    attributes:
+      label: Feature Description
+      description: A clear and concise description of the feature you'd like to see
+      placeholder: Describe the feature you want to add or improve
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation and Use Case
+      description: Why is this feature important? What problem does it solve?
+      placeholder: |
+        - What problem does this solve?
+        - How would you use this feature?
+        - Who would benefit from this?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Feature Category
+      description: What type of feature is this?
+      options:
+        - Research & Architecture (new gate designs, attention mechanisms)
+        - Training & Optimization (new training strategies, optimizers)
+        - Memory Efficiency (memory optimization techniques)
+        - Performance (speed improvements, CUDA kernels)
+        - Data & Preprocessing (dataset support, tokenization)
+        - Analysis & Visualization (plotting, benchmarking tools)
+        - Documentation & Examples (tutorials, guides)
+        - API & Usability (interface improvements)
+        - Testing & Quality (testing tools, validation)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed Solution
+      description: How do you think this feature should be implemented?
+      placeholder: |
+        - What would the API look like?
+        - Any implementation details you have in mind?
+        - References to papers or existing implementations?
+      value: |
+        ```python
+        # Example API usage (if applicable)
+
+        ```
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What other solutions have you considered?
+      placeholder: |
+        - Other approaches you've thought about
+        - Existing tools or libraries that do something similar
+        - Why those alternatives don't work for your use case
+
+  - type: textarea
+    id: research_context
+    attributes:
+      label: Research Context (Optional)
+      description: Any relevant research papers, articles, or related work
+      placeholder: |
+        - Links to relevant papers
+        - Related research in this area
+        - Existing implementations you're aware of
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority Level
+      description: How important is this feature to you?
+      options:
+        - "Critical: Blocks my research/work"
+        - "High: Would significantly improve my workflow"
+        - "Medium: Nice to have improvement"
+        - "Low: Minor enhancement"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: complexity
+    attributes:
+      label: Implementation Complexity (Your Estimate)
+      description: How complex do you think this feature would be to implement?
+      options:
+        - "Simple: Small code change or addition"
+        - "Medium: Moderate development effort"
+        - "Complex: Significant architectural changes"
+        - "Research-level: Requires novel research/experimentation"
+        - "Not sure"
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional Context
+      description: Any other context, screenshots, mockups, or examples that would help
+      placeholder: |
+        - Screenshots or mockups
+        - Example outputs or visualizations
+        - Links to similar features in other projects
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution Interest
+      description: Would you be interested in contributing to this feature?
+      options:
+        - label: I'd like to help implement this feature
+        - label: I can help with testing and validation
+        - label: I can help with documentation
+        - label: I can provide research context and guidance
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      description: Please confirm the following
+      options:
+        - label: I have searched existing issues and feature requests
+          required: true
+        - label: This feature aligns with DRAT's goals of memory-efficient transformers
+          required: true
+        - label: I have provided sufficient context and motivation
+          required: true

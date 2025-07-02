@@ -1,0 +1,42 @@
+cff-version: 1.2.0
+message: "If you use this software in your research, please cite it as below."
+type: software
+title: "DRAT: Differentiable Recomputation-Aware Transformer"
+abstract: "A novel transformer architecture that dynamically optimizes memory usage during training through learnable recomputation gates, achieving significant memory efficiency improvements while maintaining model performance."
+authors:
+  - family-names: "Gajurel"
+    given-names: "Kushal"
+    orcid: "https://orcid.org/0000-0000-0000-0000" # Replace with actual ORCID
+repository-code: "https://github.com/yourusername/differentiable-recomputation-gates" # Replace with actual repo
+url: "https://github.com/yourusername/differentiable-recomputation-gates" # Replace with actual repo
+license: MIT
+version: "0.1.0"
+date-released: "2024-12-07"
+keywords:
+  - "transformer"
+  - "memory-efficiency"
+  - "deep-learning"
+  - "pytorch"
+  - "recomputation"
+  - "attention-mechanism"
+  - "machine-learning"
+  - "neural-networks"
+  - "differentiable-programming"
+  - "gradient-checkpointing"
+preferred-citation:
+  type: article
+  title: "DRAT: Differentiable Recomputation-Aware Transformer for Memory-Efficient Training"
+  abstract: "We present DRAT, a novel transformer architecture that learns to optimize memory usage during training through differentiable recomputation gates. Our approach achieves significant memory reductions while maintaining competitive performance across various tasks."
+  authors:
+    - family-names: "Gajurel"
+      given-names: "Kushal"
+      orcid: "https://orcid.org/0000-0000-0000-0000" # Replace with actual ORCID
+  # journal: "Conference/Journal Name"  # Uncomment when published
+  # volume: 1
+  # issue: 1
+  # start: 1
+  # end: 10
+  # year: 2024
+  # doi: "10.1000/182"  # Uncomment when DOI is available
+  status: "preprint" # Change to "published" when published
+  url: "https://github.com/yourusername/differentiable-recomputation-gates" # Replace with paper URL when available

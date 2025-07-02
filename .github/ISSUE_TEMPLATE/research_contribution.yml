@@ -1,0 +1,195 @@
+name: 🔬 Research Contribution
+description: Propose a research contribution, experiment, or academic enhancement
+title: "[Research]: "
+labels: ["research", "needs-review"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for your research contribution! 🔬
+        Research contributions are essential for advancing the field of memory-efficient transformers.
+
+  - type: textarea
+    id: research_question
+    attributes:
+      label: Research Question or Hypothesis
+      description: What research question are you addressing or what hypothesis are you testing?
+      placeholder: |
+        - What specific aspect of memory-efficient transformers are you investigating?
+        - What hypothesis are you testing?
+        - What gap in current research are you filling?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: research_type
+    attributes:
+      label: Research Type
+      description: What type of research contribution is this?
+      options:
+        - Novel Architecture (new gate designs, attention mechanisms)
+        - Optimization Method (new training strategies, loss functions)
+        - Theoretical Analysis (mathematical analysis, proofs)
+        - Empirical Study (comprehensive benchmarking, ablation studies)
+        - Memory Analysis (memory consumption patterns, optimization)
+        - Computational Efficiency (speed improvements, parallelization)
+        - Comparative Study (comparison with existing methods)
+        - Reproducibility Study (reproducing published results)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: methodology
+    attributes:
+      label: Methodology
+      description: How do you plan to conduct this research?
+      placeholder: |
+        - Experimental setup and design
+        - Datasets and evaluation metrics
+        - Baseline comparisons
+        - Statistical methods for analysis
+        - Hardware requirements
+    validations:
+      required: true
+
+  - type: textarea
+    id: related_work
+    attributes:
+      label: Related Work
+      description: Key papers and related research in this area
+      placeholder: |
+        - Cite relevant papers with brief descriptions
+        - How does your work relate to or extend existing research?
+        - What makes your approach novel or different?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_outcomes
+    attributes:
+      label: Expected Outcomes
+      description: What results do you expect from this research?
+      placeholder: |
+        - Quantitative improvements (memory reduction, speed gains)
+        - Qualitative insights or understanding
+        - New algorithms or techniques
+        - Validation or refutation of hypotheses
+
+  - type: textarea
+    id: implementation_plan
+    attributes:
+      label: Implementation Plan
+      description: How will this be implemented in the DRAT codebase?
+      placeholder: |
+        - New modules or components needed
+        - Changes to existing code
+        - Experimental scripts and evaluation code
+        - Documentation and examples
+      value: |
+        ```python
+        # Pseudocode or example implementation
+
+        ```
+
+  - type: dropdown
+    id: validation_approach
+    attributes:
+      label: Validation Approach
+      description: How will you validate your research findings?
+      options:
+        - Synthetic Data Experiments
+        - Standard Benchmarks (GLUE, SuperGLUE, etc.)
+        - Domain-Specific Datasets
+        - Theoretical Proofs
+        - Computational Analysis
+        - Statistical Significance Testing
+        - Human Evaluation
+        - Combination of Above
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: resources_needed
+    attributes:
+      label: Resources Needed
+      description: What computational resources or support do you need?
+      placeholder: |
+        - Computational requirements (GPU hours, memory)
+        - Access to specific datasets
+        - Collaboration with domain experts
+        - Code review and feedback
+
+  - type: dropdown
+    id: timeline
+    attributes:
+      label: Estimated Timeline
+      description: How long do you expect this research to take?
+      options:
+        - "1-2 weeks: Quick experiment or analysis"
+        - "1 month: Small-scale study"
+        - "2-3 months: Medium-scale research project"
+        - "3-6 months: Comprehensive study"
+        - "6+ months: Long-term research program"
+        - "Ongoing: Continuous research effort"
+
+  - type: textarea
+    id: reproducibility
+    attributes:
+      label: Reproducibility Plan
+      description: How will you ensure your research is reproducible?
+      placeholder: |
+        - Code availability and documentation
+        - Random seed management
+        - Environment and dependency specification
+        - Data preprocessing scripts
+        - Evaluation protocols
+
+  - type: checkboxes
+    id: publication_intent
+    attributes:
+      label: Publication Intent
+      description: Do you plan to publish this research?
+      options:
+        - label: This is for academic publication (conference/journal)
+        - label: This is for a workshop or short paper
+        - label: This is for a technical report or preprint
+        - label: This is for internal research only
+        - label: This is for open-source contribution only
+
+  - type: textarea
+    id: collaboration
+    attributes:
+      label: Collaboration
+      description: Are you looking for collaborators or have co-researchers?
+      placeholder: |
+        - Who are your collaborators (if any)?
+        - What type of collaboration are you seeking?
+        - Are you open to co-authorship?
+
+  - type: checkboxes
+    id: ethical_considerations
+    attributes:
+      label: Ethical Considerations
+      options:
+        - label: This research follows ethical AI guidelines
+        - label: No sensitive data or biased datasets are used
+        - label: Computational resources are used responsibly
+        - label: Results will be shared openly and transparently
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      description: Please confirm the following
+      options:
+        - label: I have searched existing research and related work
+          required: true
+        - label: This research aligns with DRAT's mission
+          required: true
+        - label: I have a clear methodology and validation plan
+          required: true
+        - label: I am committed to making this research reproducible
+          required: true
