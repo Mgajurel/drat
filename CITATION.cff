@@ -6,9 +6,9 @@ abstract: "A novel transformer architecture that dynamically optimizes memory us
 authors:
   - family-names: "Gajurel"
     given-names: "Kushal"
-    orcid: "https://orcid.org/0000-0000-0000-0000" # Replace with actual ORCID
-repository-code: "https://github.com/yourusername/differentiable-recomputation-gates" # Replace with actual repo
-url: "https://github.com/yourusername/differentiable-recomputation-gates" # Replace with actual repo
+    # Add your ORCID when available: orcid: "https://orcid.org/0000-0000-0000-0000"
+repository-code: "https://github.com/YOUR_USERNAME/drat"
+url: "https://github.com/YOUR_USERNAME/drat"
 license: MIT
 version: "0.1.0"
 date-released: "2024-12-07"
@@ -30,7 +30,7 @@ preferred-citation:
   authors:
     - family-names: "Gajurel"
       given-names: "Kushal"
-      orcid: "https://orcid.org/0000-0000-0000-0000" # Replace with actual ORCID
+      # Add your ORCID when available: orcid: "https://orcid.org/0000-0000-0000-0000"
   # journal: "Conference/Journal Name"  # Uncomment when published
   # volume: 1
   # issue: 1
@@ -39,4 +39,4 @@ preferred-citation:
   # year: 2024
   # doi: "10.1000/182"  # Uncomment when DOI is available
   status: "preprint" # Change to "published" when published
-  url: "https://github.com/yourusername/differentiable-recomputation-gates" # Replace with paper URL when available
+  url: "https://github.com/mgajurel/drat" # Replace with paper URL when available

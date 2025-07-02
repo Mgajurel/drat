@@ -11,7 +11,7 @@ version = "0.1.0"
 description = "Differentiable Recomputation Gates for Memory-Efficient Transformer Training"
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "Your Name", email = "your.email@example.com" }]
+authors = [{ name = "Kushal Gajurel", email = "kushalgajurel@icloud.com" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -61,10 +61,7 @@ Documentation = "https://differentiable-recomputation-gates.readthedocs.io"
 "Bug Tracker" = "https://github.com/yourusername/differentiable-recomputation-gates/issues"
 
 [dependency-groups]
-dev = [
-    "pytest>=8.4.0",
-    "pytest-cov>=6.1.1",
-]
+dev = ["pytest>=8.4.0", "pytest-cov>=6.1.1"]
 
 [tool.black]
 line-length = 88

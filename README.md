@@ -4,7 +4,7 @@
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/yourusername/differentiable-recomputation-gates/issues)
+[![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](#-contributing)
 
 > **🚀 A novel transformer architecture that dynamically optimizes memory usage during training through learnable recomputation gates, achieving significant memory savings with minimal accuracy trade-offs.**
 
@@ -58,8 +58,8 @@ Modern transformer training faces a critical bottleneck: **memory consumption gr
 ### Installation
 
 ```bash
-git clone https://github.com/yourusername/differentiable-recomputation-gates.git
-cd differentiable-recomputation-gates
+git clone https://github.com/mgajurel/drat.git
+cd drat
 
 # Create virtual environment
 python -m venv venv
@@ -127,7 +127,7 @@ _Results on standard language modeling benchmarks with λ=0.05_
 ## 🏗️ **Project Structure**
 
 ```
-differentiable-recomputation-gates/
+drat/
 ├── src/
 │   ├── models/              # Core model implementations
 │   │   ├── gated_transformer.py    # Main DRAT model
@@ -205,14 +205,14 @@ We welcome contributions from the community! Here's how you can help:
 
 ### 🐛 **Issues & Bugs**
 
-Found a bug? Have a feature request? Please [open an issue](https://github.com/yourusername/differentiable-recomputation-gates/issues)!
+Found a bug? Have a feature request? Please open an issue on GitHub!
 
 ## 📋 **Development Setup**
 
 ```bash
 # Clone and setup development environment
-git clone https://github.com/yourusername/differentiable-recomputation-gates.git
-cd differentiable-recomputation-gates
+git clone https://github.com/mgajurel/drat.git
+cd drat
 
 # Install development dependencies
 pip install -e ".[dev]"
@@ -238,7 +238,7 @@ If you use DRAT in your research, please cite:
 ```bibtex
 @article{drat2024,
   title={DRAT: Differentiable Recomputation-Aware Transformers for Memory-Efficient Training},
-  author={Your Name},
+  author={Kushal Gajurel},
   journal={arXiv preprint arXiv:XXXX.XXXXX},
   year={2024}
 }
@@ -262,10 +262,10 @@ If you use DRAT in your research, please cite:
 
 ## 🛟 **Support & Community**
 
-- **Documentation**: [Full documentation](https://differentiable-recomputation-gates.readthedocs.io)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/differentiable-recomputation-gates/discussions)
-- **Issues**: [Bug Reports & Feature Requests](https://github.com/yourusername/differentiable-recomputation-gates/issues)
-- **Email**: your.email@example.com
+- **Code**: Check the source code and examples in this repository
+- **Issues**: Use GitHub Issues for bug reports and feature requests
+- **Discussions**: Use GitHub Discussions for questions and community interaction
+- **Research**: For research collaborations, reach out via GitHub
 
 ## 📄 **License**
 
@@ -281,5 +281,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 **⭐ Star this repository if you find it helpful! ⭐**
-
-**🔗 [Visit our project page](https://github.com/yourusername/differentiable-recomputation-gates) | 📖 [Read the docs](https://differentiable-recomputation-gates.readthedocs.io) | 🐦 [Follow updates](#)**
